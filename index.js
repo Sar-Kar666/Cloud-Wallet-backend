@@ -6,7 +6,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const { Keypair, PublicKey, Transaction, Connection } = require("@solana/web3.js");
 const cors = require ("cors");
 const bs58 = require("bs58").default;
-const connection = new Connection("https://api.devnet.solana.com")
+const connection = new Connection("https://api.devnet.solana.com");
+const auth = require("./middleware/auth");
 
 const app = express();
 app.use(express.json());
@@ -34,63 +35,67 @@ app.post ("/api/v1/signup",(req,res)=>{
     })
 })
 
-app.post("/api/v1/signin",(req,res)=>{
-    const username = req.body.username;
-    const password = req.body.password;
+app.post("/api/v1/txn/sign", authMiddleware, async (req, res) => {
+  const { serializedTx } = req.body;
 
-    const user = userModel.findOne({
-        username : username,
-        password : password
-    })
+  const tx = Transaction.from(
+    Buffer.from(serializedTx, "base64")
+  );
 
-    if(user){
-        const token = jwt.sign({
-            userId : user._id
-        }, JWT_SECRET)
-        res.json({
-            token
-        })
-    }else{
-        res.status(403).json({
-            message: " Credentials are incorrect"
-        })
-    }
-   
-})
+  const user = await userModel.findById(req.userId);
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  const keypair = Keypair.fromSecretKey(
+    Buffer.from(user.privateKey, "base64")
+  );
+
+  tx.sign(keypair);
+
+  res.json({
+    signedTx: Buffer.from(tx.serialize()).toString("base64"),
+  });
+});
 
 
+app.get("/api/v1/me", authMiddleware, async (req, res) => {
+  const user = await userModel.findById(req.userId);
 
-app.post("/api/v1/txn/sign", async (req, res) => {
-  try {
-      
-      const serializedTx  = req.body.serializedTx;
-    // 1️⃣ Load private key (DO NOT hardcode in real apps)
-    const secretKey = privateKey;
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
 
-    const keypair = Keypair.fromSecretKey(secretKey);
+  res.json({
+    username: user.username,
+    publicKey: user.publicKey,
+  });
+});
 
-    // 2️⃣ Deserialize transaction
+
+
+
+
+
+
+
+app.post("/api/v1/txn/sign",async (req,res)=>{
+    const { serializedTx } = req.body;
+
+    const privateKey = bs58.decode(process.env.SOLANA_PRIVATE_KEY);
+    const keypair = Keypair.fromSecretKey(privateKey);
+
     const tx = Transaction.from(
-      Buffer.from(serializedTx, "base64")
+        Buffer.from(serializedTx,"base64")
     );
 
-    // 3️⃣ Sign transaction
-    tx.sign(keypair);
+    tx.sign(keypair)
 
-
-    const signature = await connection.sendRawTransaction(
-      tx.serialize()
-    );
+    const signature = await connection.sendRawTransaction(tx.serialize());
 
     res.json({
-      message: "Transaction signed and sent",
-      signature
-    });
-  } catch (err) {
-    res.status(500).json({
-      error: err.message
-    });
-  }
+        message: "Sol Transfered ",
+        signature: signature
+    })
+
 });
 
 
